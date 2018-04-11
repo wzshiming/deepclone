@@ -5,91 +5,119 @@ import (
 )
 
 func Clone(v interface{}) interface{} {
-	return CloneValue(reflect.ValueOf(v)).Interface()
+	c := &cloner{}
+	r := c.Clone(v)
+	return r
 }
 
 func CloneValue(v reflect.Value) reflect.Value {
-	c := cloner{}
-	r := c.cloneValue(v)
+	c := &cloner{}
+	r := c.CloneValue(v)
 	return r
 
 }
 
 type cloner struct {
+	m map[uintptr]*reflect.Value
 }
 
-func (c cloner) cloneValue(v reflect.Value) reflect.Value {
+func (c *cloner) Clone(v interface{}) interface{} {
+	return c.CloneValue(reflect.ValueOf(v)).Interface()
+}
 
+func (c *cloner) CloneValue(v reflect.Value) reflect.Value {
+	c.m = map[uintptr]*reflect.Value{}
+	r := c.cloneValue(&v)
+	return *r
+}
+
+func (c *cloner) cloneValue(v *reflect.Value) (r *reflect.Value) {
 	switch v.Kind() {
 	case reflect.Interface:
 		if v.IsNil() {
 			return v
 		}
-		v = v.Elem()
-		fallthrough
+		ve := v.Elem()
+
+		return c.cloneValue(&ve)
+
 	case reflect.Ptr:
 		if v.IsNil() {
 			return v
 		}
 
-		nt := c.cloneValue(v.Elem())
-		if nt.CanAddr() {
-			nt = nt.Addr()
-		} else if nt.CanInterface() {
-			tt := nt.Interface()
-			nt = reflect.ValueOf(&tt)
+		// 标记指针 处理循环引用
+		point := v.Pointer()
+		if nn, ok := c.m[point]; ok {
+			return nn
 		}
 
-		return nt
+		nn := reflect.New(v.Type().Elem())
+		c.m[point] = &nn
+
+		ve := v.Elem()
+		nt := c.cloneValue(&ve)
+		nn.Elem().Set(*nt)
+
+		return &nn
+
 	case reflect.Struct:
 		nf := v.NumField()
-		nt := reflect.New(v.Type()).Elem()
+		rr := reflect.New(v.Type())
+		nt := rr.Elem()
 
 		for i := 0; i != nf; i++ {
 			mi := v.Field(i)
 			if !mi.CanSet() {
 				continue
 			}
-			mv := c.cloneValue(mi)
-			nt.Field(i).Set(mv)
+			nf := nt.Field(i)
+			mv := c.cloneValue(&mi)
+
+			nf.Set(*mv)
 		}
 
-		return nt
+		return &nt
+
 	case reflect.Map:
 		nt := reflect.MakeMap(v.Type())
-
 		for _, i := range v.MapKeys() {
 			mi := v.MapIndex(i)
-			mk := c.cloneValue(i)
-			mv := c.cloneValue(mi)
-			nt.SetMapIndex(mk, mv)
+			mk := c.cloneValue(&i)
+			mv := c.cloneValue(&mi)
+
+			nt.SetMapIndex(*mk, *mv)
 		}
 
-		return nt
+		return &nt
+
 	case reflect.Array:
 		nt := reflect.New(v.Type()).Elem()
 		l := nt.Len()
 
 		for i := 0; i != l; i++ {
 			mi := v.Index(i)
-			mv := c.cloneValue(mi)
-			nt.Index(i).Set(mv)
-		}
+			ni := nt.Index(i)
+			mv := c.cloneValue(&mi)
 
-		return nt
+			ni.Set(*mv)
+		}
+		return &nt
+
 	case reflect.Slice:
 		l := v.Len()
 		nt := reflect.MakeSlice(v.Type(), l, v.Cap())
 
 		for i := 0; i != l; i++ {
 			mi := v.Index(i)
-			mv := c.cloneValue(mi)
-			nt.Index(i).Set(mv)
-		}
+			ni := nt.Index(i)
+			mv := c.cloneValue(&mi)
 
-		return nt
+			ni.Set(*mv)
+		}
+		return &nt
+
 	default:
 		return v
 	}
-
 }
