@@ -4,12 +4,14 @@ import (
 	"reflect"
 )
 
+// Clone a complete clone
 func Clone(v interface{}) interface{} {
 	c := &cloner{}
 	r := c.Clone(v)
 	return r
 }
 
+// CloneValue a complete clone for reflect.Value
 func CloneValue(v reflect.Value) reflect.Value {
 	c := &cloner{}
 	r := c.CloneValue(v)
